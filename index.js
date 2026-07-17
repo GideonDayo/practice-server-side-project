@@ -79,6 +79,33 @@ app.get('/users', async (req, res) => {
   }
 });
 
+// get/set active user (placed before /users/:id to avoid route conflicts)
+app.get('/users/active', async (req, res) => {
+  try {
+    const id = await redis.get('activeUser');
+    if (!id) return res.json(null);
+    const user = await redis.hGetAll(`user:${id}`);
+    if (!user || !user.id) return res.json(null);
+    res.json(user);
+  } catch (err) {
+    console.error('Error getting active user:', err.message);
+    res.status(500).json({ error: 'Could not get active user' });
+  }
+});
+
+app.post('/users/active', async (req, res) => {
+  try {
+    const { userId } = req.body;
+    const user = await redis.hGetAll(`user:${userId}`);
+    if (!user || !user.id) return res.status(404).json({ error: 'User not found' });
+    await redis.set('activeUser', userId);
+    res.json({ userId, message: 'Active user updated' });
+  } catch (err) {
+    console.error('Error setting active user:', err.message);
+    res.status(500).json({ error: 'Could not set active user' });
+  }
+});
+
 // get one user
 app.get('/users/:id', async (req, res) => {
   try {
@@ -124,6 +151,33 @@ app.delete('/users/:id', async (req, res) => {
   } catch (err) {
     console.error('Error deleting user:', err.message);
     res.status(500).json({ error: 'Could not delete user' });
+  }
+});
+
+// get/set active user
+app.get('/users/active', async (req, res) => {
+  try {
+    const id = await redis.get('activeUser');
+    if (!id) return res.json(null);
+    const user = await redis.hGetAll(`user:${id}`);
+    if (!user || !user.id) return res.json(null);
+    res.json(user);
+  } catch (err) {
+    console.error('Error getting active user:', err.message);
+    res.status(500).json({ error: 'Could not get active user' });
+  }
+});
+
+app.post('/users/active', async (req, res) => {
+  try {
+    const { userId } = req.body;
+    const user = await redis.hGetAll(`user:${userId}`);
+    if (!user || !user.id) return res.status(404).json({ error: 'User not found' });
+    await redis.set('activeUser', userId);
+    res.json({ userId, message: 'Active user updated' });
+  } catch (err) {
+    console.error('Error setting active user:', err.message);
+    res.status(500).json({ error: 'Could not set active user' });
   }
 });
 

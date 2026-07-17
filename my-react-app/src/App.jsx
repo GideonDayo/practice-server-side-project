@@ -1,94 +1,158 @@
-import { useState, useEffect } from 'react'
-import Users from './Users'
+import { useEffect, useState } from 'react'
 import './App.css'
 
-function App() {
-  // state for search input, movie data, loading/error states
+const API = 'http://localhost:3000'
+
+export default function App() {
+  // users
+  const [users, setUsers] = useState([])
+  const [activeUser, setActiveUser] = useState(null)
+  const [form, setForm] = useState({ name: '', favoriteGenre: '' })
+  const [editingId, setEditingId] = useState(null)
+
+  // movie search
   const [searchInput, setSearchInput] = useState('')
   const [movie, setMovie] = useState(null)
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState(null)
+  const [error, setError] = useState('')
 
-  // active user state, persisted in localStorage
-  const [activeUser, setActiveUser] = useState(() => {
-    const saved = localStorage.getItem('activeUser')
-    return saved ? JSON.parse(saved) : null
-  })
-
-  // favorites for the active user
   const [favorites, setFavorites] = useState([])
 
-  // sync active user to localStorage
-  useEffect(() => {
-    if (activeUser) {
-      localStorage.setItem('activeUser', JSON.stringify(activeUser))
-      fetchFavorites(activeUser.id)
-    } else {
-      localStorage.removeItem('activeUser')
-      setFavorites([])
-    }
-  }, [activeUser])
-
-  const fetchFavorites = async (userId) => {
+  async function loadUsers() {
     try {
-      const res = await fetch(`http://localhost:3000/users/${userId}/favorites`)
-      if (res.ok) {
-        const data = await res.json()
-        setFavorites(data)
-      }
+      const res = await fetch(`${API}/users`)
+      const data = await res.json()
+      setUsers(data)
     } catch (err) {
-      console.error('Failed to fetch favorites:', err)
+      setError('Could not load users')
     }
   }
 
-  // handle search form submission
-  const handleSearch = async (e) => {
-    e.preventDefault()
-
-    // make sure they actually typed something
-    if (!searchInput.trim()) {
-      setError('Please enter a movie title')
-      return
-    }
-
-    setLoading(true)
-    setError(null)
-    setMovie(null)
-
+  async function loadActive() {
     try {
-      // call our backend which calls omdb
-      const response = await fetch(`http://localhost:3000/?title=${searchInput}`)
-      const data = await response.json()
-
-      // omdb returns Response: 'False' if movie not found
-      if (data.Response === 'False') {
-        setError(data.Error || 'Movie not found')
-      } else {
-        setMovie(data)
-      }
+      const res = await fetch(`${API}/users/active`)
+      const data = await res.json()
+      setActiveUser(data)
+      if (data) fetchFavorites(data.id)
     } catch (err) {
-      setError('Could not fetch movie information')
+      setError('Could not load active user')
+    }
+  }
+
+  useEffect(() => {
+    loadUsers()
+    loadActive()
+  }, [])
+
+  async function handleSubmit(e) {
+    e.preventDefault()
+    setLoading(true)
+    setError('')
+    try {
+      const url = editingId ? `${API}/users/${editingId}` : `${API}/users`
+      const method = editingId ? 'PUT' : 'POST'
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form)
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Request failed')
+      setForm({ name: '', favoriteGenre: '' })
+      setEditingId(null)
+      await loadUsers()
+      await loadActive()
+    } catch (err) {
+      setError(err.message)
     } finally {
       setLoading(false)
     }
   }
 
-  // fetch a random movie from the backend
-  const handleRandomMovie = async () => {
-    setLoading(true)
-    setError(null)
-    setMovie(null)
+  function startEdit(user) {
+    setEditingId(user.id)
+    setForm({ name: user.name || '', favoriteGenre: user.favoriteGenre || '' })
+  }
 
+  async function setActive(userId) {
     try {
-      // call the random endpoint which picks one for us
-      const response = await fetch('http://localhost:3000/random')
-      const data = await response.json()
-
-      if (data.Response === 'False') {
-        setError(data.Error || 'Movie not found')
-      } else {
-        setMovie(data)
+      const res = await fetch(`${API}/users/active`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId })
+      })
+      if (!res.ok) {
+        const data = await res.json()
+        throw new Error(data.error || 'Could not set active')
       }
+      await loadUsers()
+      await loadActive()
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  async function removeUser(id) {
+    try {
+      const res = await fetch(`${API}/users/${id}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error('Failed to delete')
+      await loadUsers()
+      await loadActive()
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  async function fetchFavorites(userId) {
+    if (!userId) return setFavorites([])
+    try {
+      const res = await fetch(`${API}/users/${userId}/favorites`)
+      const data = await res.json()
+      setFavorites(data || [])
+    } catch (err) {
+      setError('Could not load favorites')
+    }
+  }
+
+  async function handleSaveFavorite() {
+    if (!activeUser || !movie) return
+    try {
+      await fetch(`${API}/users/${activeUser.id}/favorites`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: movie.Title })
+      })
+      fetchFavorites(activeUser.id)
+    } catch (err) {
+      setError('Failed to save favorite')
+    }
+  }
+
+  async function handleRemoveFavorite(title) {
+    if (!activeUser) return
+    try {
+      await fetch(`${API}/users/${activeUser.id}/favorites`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title })
+      })
+      fetchFavorites(activeUser.id)
+    } catch (err) {
+      setError('Failed to remove favorite')
+    }
+  }
+
+  async function handleSearch(e) {
+    e && e.preventDefault()
+    if (!searchInput.trim()) return setError('Enter a title')
+    setLoading(true)
+    setError('')
+    setMovie(null)
+    try {
+      const res = await fetch(`${API}/?title=${encodeURIComponent(searchInput)}`)
+      const data = await res.json()
+      if (data.Response === 'False') setError(data.Error || 'Movie not found')
+      else setMovie(data)
     } catch (err) {
       setError('Could not fetch movie')
     } finally {
@@ -96,119 +160,103 @@ function App() {
     }
   }
 
-  // save the current movie as a favorite
-  const handleSaveFavorite = async () => {
-    if (!activeUser || !movie) return
-
+  async function handleRandomMovie() {
+    setLoading(true)
+    setError('')
+    setMovie(null)
     try {
-      const res = await fetch(`http://localhost:3000/users/${activeUser.id}/favorites`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: movie.Title }),
-      })
-      if (res.ok) {
-        fetchFavorites(activeUser.id)
-      }
+      const res = await fetch(`${API}/random`)
+      const data = await res.json()
+      if (data.Response === 'False') setError(data.Error || 'Movie not found')
+      else setMovie(data)
     } catch (err) {
-      console.error('Failed to save favorite:', err)
-    }
-  }
-
-  // remove a movie from favorites
-  const handleRemoveFavorite = async (title) => {
-    if (!activeUser) return
-
-    try {
-      await fetch(`http://localhost:3000/users/${activeUser.id}/favorites`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title }),
-      })
-      fetchFavorites(activeUser.id)
-    } catch (err) {
-      console.error('Failed to remove favorite:', err)
+      setError('Could not fetch movie')
+    } finally {
+      setLoading(false)
     }
   }
 
   return (
-    <div className="App">
-      {/* active user bar */}
-      <div className="active-user-bar">
-        {activeUser ? (
-          <span>Active user: <strong>{activeUser.name}</strong></span>
-        ) : (
-          <span>No active user selected</span>
-        )}
-      </div>
+    <div className="app" style={{ maxWidth: 980, margin: '0 auto', padding: 20 }}>
+      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h1>Movie Favorites</h1>
+        <div>{activeUser ? `Active: ${activeUser.name}` : 'No active user'}</div>
+      </header>
 
-      <div className="main-layout">
-        {/* sidebar: user management */}
-        <aside className="sidebar">
-          <Users activeUser={activeUser} setActiveUser={setActiveUser} />
+      {error && <p style={{ color: 'crimson' }}>{error}</p>}
 
-          {/* favorites section */}
-          {activeUser && (
-            <div className="favorites-section">
-              <h3>{activeUser.name}'s Favorites</h3>
-              {favorites.length === 0 ? (
-                <p className="no-favorites">No favorites yet</p>
-              ) : (
-                <ul className="favorites-list">
-                  {favorites.map((title) => (
-                    <li key={title}>
-                      <span>{title}</span>
-                      <button onClick={() => handleRemoveFavorite(title)} className="remove-btn">Remove</button>
+      <div style={{ display: 'flex', gap: 24, marginTop: 16 }}>
+        <aside style={{ width: 320 }}>
+          <form onSubmit={handleSubmit} style={{ marginBottom: 16 }}>
+            <h3>{editingId ? 'Edit user' : 'Create user'}</h3>
+            <input placeholder="Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+            <input placeholder="Favorite genre" value={form.favoriteGenre} onChange={(e) => setForm({ ...form, favoriteGenre: e.target.value })} />
+            <div style={{ marginTop: 8 }}>
+              <button type="submit">{loading ? 'Saving...' : editingId ? 'Save' : 'Create'}</button>
+              {editingId && <button type="button" onClick={() => { setEditingId(null); setForm({ name: '', favoriteGenre: '' }) }}>Cancel</button>}
+            </div>
+          </form>
+
+          <div>
+            <h3>Users</h3>
+            {users.length === 0 && <div>No users yet</div>}
+            {users.map((u) => (
+              <div key={u.id} style={{ border: '1px solid #ddd', padding: 8, marginBottom: 8 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <div>
+                    <strong>{u.name}</strong>
+                    <div style={{ fontSize: 12 }}>{u.favoriteGenre}</div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    {u.active && <span style={{ color: 'green' }}>Active</span>}
+                    <button onClick={() => startEdit(u)}>Edit</button>
+                    <button onClick={() => setActive(u.id)}>Make active</button>
+                    <button onClick={() => removeUser(u.id)}>Delete</button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </aside>
+
+        <main style={{ flex: 1 }}>
+          <section style={{ marginBottom: 16 }}>
+            <h2>Movie Search</h2>
+            <form onSubmit={handleSearch} style={{ display: 'flex', gap: 8 }}>
+              <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)} placeholder="Enter movie title" />
+              <button type="submit">Search</button>
+              <button type="button" onClick={handleRandomMovie}>Random</button>
+            </form>
+            {loading && <p>Loading...</p>}
+            {movie && (
+              <div style={{ marginTop: 12 }}>
+                <h3>{movie.Title}</h3>
+                <p>{movie.Plot}</p>
+                {movie.Poster && movie.Poster !== 'N/A' && <img src={movie.Poster} alt={movie.Title} style={{ maxWidth: 200 }} />}
+                {activeUser && <div><button onClick={handleSaveFavorite}>Save to {activeUser.name}'s Favorites</button></div>}
+              </div>
+            )}
+          </section>
+
+          <section>
+            <h2>Favorites</h2>
+            {activeUser ? (
+              favorites.length === 0 ? <div>No favorites</div> : (
+                <ul>
+                  {favorites.map((f) => (
+                    <li key={f} style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span>{f}</span>
+                      <button onClick={() => handleRemoveFavorite(f)}>Remove</button>
                     </li>
                   ))}
                 </ul>
-              )}
-            </div>
-          )}
-        </aside>
-
-        {/* main content: movie search */}
-        <main className="content">
-          <h1>Movie Search</h1>
-          {/* search form */}
-          <form onSubmit={handleSearch}>
-            <input
-              type="text"
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
-              placeholder="Enter movie title"
-            />
-            <button type="submit">Search</button>
-          </form>
-          {/* button to get a random movie */}
-          <button type="button" onClick={handleRandomMovie}>
-            Random Movie
-          </button>
-
-          {/* show loading spinner */}
-          {loading && <p>Loading...</p>}
-          {/* show error message if something went wrong */}
-          {error && <p style={{ color: 'red' }}>{error}</p>}
-          {/* display movie info if we got a result */}
-          {movie && (
-            <div className="movie-result">
-              <h2>{movie.Title}</h2>
-              <p>{movie.Plot}</p>
-              {/* only show poster if it exists */}
-              {movie.Poster && movie.Poster !== 'N/A' && (
-                <img src={movie.Poster} alt={movie.Title} />
-              )}
-              {/* save to favorites button, only when a user is active */}
-              {activeUser && (
-                <button onClick={handleSaveFavorite} className="save-favorite-btn">
-                  Save to Favorites
-                </button>
-              )}
-            </div>
-          )}
+              )
+            ) : (
+              <div>Select an active user to view favorites</div>
+            )}
+          </section>
         </main>
       </div>
     </div>
   )
 }
-
-export default App
