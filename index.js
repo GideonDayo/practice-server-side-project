@@ -9,9 +9,12 @@ app.use(express.json());
 app.use(cors());
 
 // redis client setup
-const redis = createClient({ url: 'redis://localhost:6379' });
-redis.on('error', (err) => console.error('Redis error:', err));
-redis.connect().then(() => console.log('Connected to Redis'));
+const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
+const redis = createClient({ url: redisUrl });
+redis.on('error', (err) => console.error('Redis error:', err.message || err));
+redis.connect()
+  .then(() => console.log('Connected to Redis'))
+  .catch((err) => console.error('Redis connection failed:', err.message || err));
 
 // search endpoint - takes a movie title and fetches from omdb
 app.get("/", async (req, res) => {
