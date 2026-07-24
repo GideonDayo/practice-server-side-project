@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react'
+import { usePostHog } from '@posthog/react'
 import './App.css'
 
 const API = 'http://localhost:3000'
 
 export default function App() {
+  const posthog = usePostHog()
+
   // users
   const [users, setUsers] = useState([])
   const [activeUser, setActiveUser] = useState(null)
@@ -33,7 +36,10 @@ export default function App() {
       const res = await fetch(`${API}/users/active`)
       const data = await res.json()
       setActiveUser(data)
-      if (data) fetchFavorites(data.id)
+      if (data) {
+        fetchFavorites(data.id)
+        posthog?.identify(String(data.id), { name: data.name, favorite_genre: data.favoriteGenre })
+      }
     } catch (err) {
       setError('Could not load active user')
     }
@@ -58,6 +64,7 @@ export default function App() {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Request failed')
+      posthog?.capture(editingId ? 'user_updated' : 'user_created', { favorite_genre: form.favoriteGenre })
       setForm({ name: '', favoriteGenre: '' })
       setEditingId(null)
       await loadUsers()
@@ -85,6 +92,14 @@ export default function App() {
         const data = await res.json()
         throw new Error(data.error || 'Could not set active')
       }
+      const selectedUser = users.find((u) => u.id === userId)
+      if (activeUser && activeUser.id !== userId) {
+        posthog?.reset()
+      }
+      posthog?.capture('active_user_set')
+      if (selectedUser) {
+        posthog?.identify(String(selectedUser.id), { name: selectedUser.name, favorite_genre: selectedUser.favoriteGenre })
+      }
       await loadUsers()
       await loadActive()
     } catch (err) {
@@ -96,6 +111,10 @@ export default function App() {
     try {
       const res = await fetch(`${API}/users/${id}`, { method: 'DELETE' })
       if (!res.ok) throw new Error('Failed to delete')
+      posthog?.capture('user_deleted')
+      if (activeUser && activeUser.id === id) {
+        posthog?.reset()
+      }
       await loadUsers()
       await loadActive()
     } catch (err) {
@@ -122,6 +141,7 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: movie.Title })
       })
+      posthog?.capture('favorite_saved', { genre: movie.Genre, year: movie.Year })
       fetchFavorites(activeUser.id)
     } catch (err) {
       setError('Failed to save favorite')
@@ -136,6 +156,7 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title })
       })
+      posthog?.capture('favorite_removed')
       fetchFavorites(activeUser.id)
     } catch (err) {
       setError('Failed to remove favorite')
@@ -151,8 +172,13 @@ export default function App() {
     try {
       const res = await fetch(`${API}/?title=${encodeURIComponent(searchInput)}`)
       const data = await res.json()
-      if (data.Response === 'False') setError(data.Error || 'Movie not found')
-      else setMovie(data)
+      if (data.Response === 'False') {
+        setError(data.Error || 'Movie not found')
+        posthog?.capture('movie_searched', { found: false })
+      } else {
+        setMovie(data)
+        posthog?.capture('movie_searched', { found: true, genre: data.Genre, year: data.Year })
+      }
     } catch (err) {
       setError('Could not fetch movie')
     } finally {
@@ -167,8 +193,13 @@ export default function App() {
     try {
       const res = await fetch(`${API}/random`)
       const data = await res.json()
-      if (data.Response === 'False') setError(data.Error || 'Movie not found')
-      else setMovie(data)
+      if (data.Response === 'False') {
+        setError(data.Error || 'Movie not found')
+        posthog?.capture('random_movie_requested', { found: false })
+      } else {
+        setMovie(data)
+        posthog?.capture('random_movie_requested', { found: true, genre: data.Genre, year: data.Year })
+      }
     } catch (err) {
       setError('Could not fetch movie')
     } finally {
